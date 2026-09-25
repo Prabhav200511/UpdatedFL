@@ -1,0 +1,236 @@
+{
+  "config": {
+    "rounds": 12,
+    "seed": 42,
+    "num_vehicles": 30,
+    "batch_size": 64,
+    "learning_rate": 0.0015,
+    "max_samples_per_vehicle": 3000,
+    "dirichlet_alpha": 0.5,
+    "rsu_validation_rows": 1500,
+    "use_private_models": true,
+    "dml_alpha": 0.5,
+    "dml_beta": 0.5,
+    "dml_temperature": 3.0,
+    "dp_noise_multiplier": 0.0,
+    "dp_clip_norm": 1.0,
+    "dp_delta": 1e-05,
+    "selection": "pomdp",
+    "random_selection_fraction": 0.5,
+    "baseline_compression": "none",
+    "baseline_aggregation": "data",
+    "baseline_local_epochs": 2,
+    "belief_levels": 3,
+    "observation_noise": {
+      "trust": 0.1,
+      "utility": 0.12,
+      "uncertainty": 0.1,
+      "rho": 0.5
+    },
+    "rho_level_centres": [
+      10.0,
+      30.0,
+      90.0,
+      270.0,
+      810.0
+    ],
+    "rho_log_spread": 0.55,
+    "report_noise_std": 0.05,
+    "transition_prior_strength": 8.0,
+    "xi_init": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "xi_learning_rate": 0.05,
+    "xi_max": 4.0,
+    "psi_thresholds": [
+      0.02,
+      0.08,
+      0.2
+    ],
+    "local_epoch_options": [
+      1,
+      2
+    ],
+    "compression_options": [
+      "none",
+      "q8",
+      "q4",
+      "topk"
+    ],
+    "aggregation_options": [
+      "score",
+      "data",
+      "uniform"
+    ],
+    "topk_fraction": 0.1,
+    "min_selected_per_rsu": 1,
+    "reward_weights": [
+      20.0,
+      0.3,
+      0.3,
+      0.3,
+      1.0
+    ],
+    "discount": 0.9,
+    "q_learning_rate": 0.05,
+    "exploration_start": 0.5,
+    "exploration_decay": 0.85,
+    "exploration_min": 0.05,
+    "comm_budget_bytes": 60000.0,
+    "comp_budget_seconds": 400.0,
+    "rsu_validation_guard": true,
+    "rsu_guard_tolerance": 0.02,
+    "trust_forgetting": 0.9,
+    "trust_median_multiplier": 3.0,
+    "malicious_fraction": 0.1,
+    "malicious_scale": 8.0,
+    "rsu_layout": [
+      [
+        "RSU_0",
+        0.0,
+        0.0
+      ],
+      [
+        "RSU_1",
+        0.0,
+        1800.0
+      ],
+      [
+        "RSU_2",
+        1800.0,
+        0.0
+      ],
+      [
+        "RSU_3",
+        0.0,
+        -1800.0
+      ],
+      [
+        "RSU_4",
+        -1800.0,
+        0.0
+      ]
+    ],
+    "rsu_range_m": 1000.0,
+    "area_half_width_m": 2400.0,
+    "speed_range_mps": [
+      10.0,
+      30.0
+    ],
+    "heading_jitter_rad": 0.25,
+    "gps_noise_m": 25.0,
+    "round_duration_s": 90.0,
+    "compute_samples_per_s": [
+      25.0,
+      150.0
+    ],
+    "per_message_overhead_s": 0.05,
+    "link_bandwidth_hz": 10000000.0,
+    "link_tx_power_dbm": 23.0,
+    "link_antenna_gain_db": 10.0,
+    "link_path_loss_1m_db": 46.4,
+    "link_path_loss_exponent": 2.7,
+    "link_noise_figure_db": 9.0,
+    "link_max_rate_bps": 6000000.0,
+    "link_snr_reference": 1.0,
+    "link_max_retries": 3,
+    "random_disconnect_prob": [
+      0.0,
+      0.15
+    ],
+    "pseudonym_lifetime_rounds": 3,
+    "pseudonym_pool_size": 3,
+    "revoke_malicious_after": 3,
+    "forged_auth_attempts_per_round": 1,
+    "output_dir": "results",
+    "make_plots": true,
+    "verbose": false
+  },
+  "initial_test_accuracy": 0.04605013132095337,
+  "final_test_accuracy": 0.8179832696914673,
+  "final_test_macro_f1": 0.4053794784497893,
+  "best_test_accuracy": 0.8205469250679016,
+  "total_selected": 121,
+  "total_accepted": 91,
+  "total_dropouts": 27,
+  "overall_dropout_rate": 0.2231404958677686,
+  "total_upload_bytes": 2190925.0,
+  "total_anomalies_rejected": 3,
+  "malicious_accepted": 0,
+  "auth_rejected": 58,
+  "adversary_attempts": {
+    "unregistered": 20,
+    "key_mismatch": 20,
+    "replay": 18
+  },
+  "revocations": [],
+  "malicious_identities": [
+    "V002",
+    "V019",
+    "V022"
+  ],
+  "chain_height": 16,
+  "chain_valid": true,
+  "replicas_consistent": true,
+  "chain_stats": {
+    "blocks": 16,
+    "transactions": 188,
+    "rejected_blocks": 0,
+    "bytes": 353749
+  },
+  "xi_final": {
+    "RSU_0": [
+      0.9531103934364977,
+      1.0502846463998963,
+      1.1360586875000116,
+      1.065133716953595
+    ],
+    "RSU_1": [
+      1.1169790407735452,
+      1.0957604810703425,
+      0.9649777886512841,
+      0.9628026249043622
+    ],
+    "RSU_2": [
+      1.145537369676872,
+      0.9977653627054861,
+      1.0240579560500642,
+      1.0375252595026163
+    ],
+    "RSU_3": [
+      1.1097963588417534,
+      1.0984754750884373,
+      0.9858768461859735,
+      0.9952735428020688
+    ],
+    "RSU_4": [
+      1.1050288213674442,
+      0.943686509094831,
+      1.0046969010909577,
+      0.9913374544847389
+    ]
+  },
+  "network": {
+    "broadcast_bytes": 5665350.0,
+    "broadcast_airtime_s": 7.553800000000006,
+    "broadcast_messages": 60.0,
+    "type_ROUND_START_bytes": 5665350.0,
+    "v2i_bytes": 2515645.0,
+    "v2i_airtime_s": 3.6986973333333437,
+    "v2i_messages": 388.0,
+    "type_AUTH_BEACON_bytes": 207254.0,
+    "type_TRAIN_CONFIG_bytes": 117466.0,
+    "type_LOCAL_UPDATE_bytes": 2190925.0,
+    "i2i_bytes": 2140405.0,
+    "i2i_airtime_s": 0.18512324000000008,
+    "i2i_messages": 84.0,
+    "type_CLUSTER_UPDATE_bytes": 2133055.0,
+    "type_BELIEF_REQUEST_bytes": 1468.0,
+    "type_BELIEF_RESPONSE_bytes": 5882.0,
+    "v2i_lost": 1.0
+  },
+  "wall_clock_s": 122.26366980000239
+}

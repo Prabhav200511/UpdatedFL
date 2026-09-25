@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+venv/
+.venv/
+env/
+.env
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+# Simulation outputs (regenerate with `python main.py`); only the reference
+# comparison is committed.
+results/*
+!results/reference_seed42_12rounds/
+results_*/

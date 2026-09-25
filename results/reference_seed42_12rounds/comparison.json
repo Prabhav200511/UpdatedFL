@@ -1,0 +1,42 @@
+{
+  "pomdp": {
+    "final_test_accuracy": 0.8179832696914673,
+    "final_test_macro_f1": 0.4053794784497893,
+    "best_test_accuracy": 0.8205469250679016,
+    "overall_dropout_rate": 0.2231404958677686,
+    "total_upload_bytes": 2190925.0,
+    "malicious_accepted": 0,
+    "total_dropouts": 27,
+    "total_selected": 121
+  },
+  "random": {
+    "final_test_accuracy": 0.8253892660140991,
+    "final_test_macro_f1": 0.5033397861942315,
+    "best_test_accuracy": 0.8253892660140991,
+    "overall_dropout_rate": 0.524390243902439,
+    "total_upload_bytes": 1460515.0,
+    "malicious_accepted": 0,
+    "total_dropouts": 43,
+    "total_selected": 82
+  },
+  "all": {
+    "final_test_accuracy": 0.8206418752670288,
+    "final_test_macro_f1": 0.48962619716609074,
+    "best_test_accuracy": 0.8222559690475464,
+    "overall_dropout_rate": 0.5454545454545454,
+    "total_upload_bytes": 1638625.0,
+    "malicious_accepted": 0,
+    "total_dropouts": 54,
+    "total_selected": 99
+  },
+  "greedy": {
+    "final_test_accuracy": 0.8186479210853577,
+    "final_test_macro_f1": 0.433417311132499,
+    "best_test_accuracy": 0.8186479210853577,
+    "overall_dropout_rate": 0.40860215053763443,
+    "total_upload_bytes": 1994848.0,
+    "malicious_accepted": 0,
+    "total_dropouts": 38,
+    "total_selected": 93
+  }
+}
