@@ -24,18 +24,31 @@ python -m venv .venv && .venv/Scripts/activate      # Windows; use bin/activate 
 pip install -r requirements.txt
 python main.py                          # BC-PAFL, 10 rounds, 30 vehicles, 5 RSUs
 python main.py --compare --rounds 12    # BC-PAFL vs. random / all / greedy selection
-python -m pytest                        # 37 tests
+python -m pytest                        # 38 tests
 ```
 
 Useful flags: `--rounds`, `--vehicles`, `--seed`, `--selection {pomdp,random,all,greedy}`,
-`--malicious 0.1` (fraction of poisoning vehicles), `--alpha 0.5` / `--iid` (data skew),
-`--no-private` (disable ProxyFL private models), `--dp-noise 1.0` (DP-SGD on the shared model),
-`--quiet`, `--no-plots`. Every other parameter is in [`bcpafl/config.py`](bcpafl/config.py).
+`--malicious 0.1` (fraction of poisoning vehicles), `--alpha 0.5` (Dirichlet label skew; the
+default is IID, as in v1), `--lr-decay 0.95` (per-round learning-rate decay, v1's value; 1.0 =
+constant), `--no-private` (disable ProxyFL private models), `--dp-noise 1.0` (DP-SGD on the
+shared model), `--quiet`, `--no-plots`. Every other parameter is in
+[`bcpafl/config.py`](bcpafl/config.py).
 
 Outputs go to `results/<selection>/` (git-ignored): `rounds.csv` (one row per round), `rsu_rounds.csv` (one
 row per RSU per round: action, reward terms, selection, dropouts by cause, ξ…),
 `summary.json`, and `bcpafl_dashboard.png`. `--compare` also writes `comparison.json` and
-`comparison.png`.
+`comparison.png`. The v1-style VANET suite writes `vanet_metrics.csv` (one row per node per
+round) and the `vanet_*.png` figures, using v1's definitions:
+
+- **Training loss** is each vehicle's private-model DML loss, (1−α)·CE + α·KL. Every vehicle
+  trains its private model every round. Selected vehicles train it jointly with M_i. The
+  others run the same DML against their local copy of the shared model, which is never uploaded.
+- **Private accuracy** is the private model on the vehicle's local held-out split.
+- **Global proxy accuracy** is the aggregated model on the attack benchmark
+  (`attack1-5_test.csv`), which is what v1's server reports. The held-out test split is in
+  `global_test_accuracy_pct` and in `rounds.csv`.
+- The per-vehicle energy, latency and crypto figures average only the vehicles that trained M_i
+  for upload that round (`fl_participant = 1`).
 
 ## Architecture
 
@@ -130,7 +143,8 @@ row per RSU per round: action, reward terms, selection, dropouts by cause, ξ…
 |---|---|
 | Certificateless signatures, batch verification, pairwise ECDH, AES-GCM, MIRACL P-256 | Keys belong to **pseudonyms**, not node names; signature moved **inside** the AEAD (v1 limitation L7); nonce-replay cache (L8) |
 | TA/KGC AID construction and identity recovery | Dynamic pseudonym pools, validity windows, on-chain registration, TA tracing and revocation |
-| Proxy/private models with Deep Mutual Learning, optional DP-SGD and RDP accounting | Shared model enlarged to 4→64→64→6 so compression matters. DML is optional (`--no-private`) |
+| Proxy/private models with Deep Mutual Learning, optional DP-SGD and RDP accounting | Shared model enlarged to 4→64→64→6 so compression matters. DML is optional (`--no-private`). As in v1, every vehicle trains its private model every round with a per-round LR decay of 0.95. Only POMDP-selected vehicles upload M_i |
+| IID partitions (v1 default) | Dirichlet label skew is available with `--alpha` |
 | L2-deviation trust filter | Generalised to model deltas (norm + cosine against the median update) plus a validation check for the cold start |
 | Wire codec, 802.11p-style link budget | Frame errors and ARQ now **affect delivery**; broadcast vs unicast airtime |
 | Hierarchical vehicle → RSU → server flow | POMDP selection, adaptive aggregation (Eq. 12–13), Eq. 19 weighting, blockchain |
@@ -159,9 +173,11 @@ rejected, and the rejections are counted by reason in `rounds.csv`:
 ## Results
 
 Reference comparison in [`results/reference_seed42_12rounds/`](results/reference_seed42_12rounds/):
-seed 42, 30 vehicles, 5 RSUs, 10% malicious vehicles, 12 rounds. Reproduce with
-`python main.py --compare --rounds 12`. New runs are written to `results/<selection>/`, which
-git ignores.
+seed 42, 30 vehicles, 5 RSUs, 10% malicious vehicles, 12 rounds. It was produced before
+private models trained every round, under the earlier defaults (`--alpha 0.5`, no LR decay),
+so current runs will not reproduce these exact numbers. The closest current command is
+`python main.py --compare --rounds 12 --alpha 0.5 --lr-decay 1.0`. New runs are written to
+`results/<selection>/`, which git ignores.
 
 | Selection | Final accuracy | Final macro-F1 | Dropout rate of selected vehicles | Upload |
 |---|---|---|---|---|

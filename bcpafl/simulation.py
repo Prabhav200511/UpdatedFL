@@ -237,7 +237,6 @@ class Simulation:
         upload_bytes: Dict[str, Dict[str, float]] = {name: {} for name in self.rsus}
         compute: Dict[str, Dict[str, float]] = {name: {} for name in self.rsus}
         train_wall = 0.0
-        train_stats = []
         valid_pids = [pid for pid in ref.pseudonyms if ref.pseudonym_status(pid, t)[0]]
         for k, (name, rsu) in enumerate(self.rsus.items()):
             rsu_pk = ref.infra_public_key(name)
@@ -312,13 +311,13 @@ class Simulation:
                     continue
                 epochs = int(config["local_epochs"])
                 tw = time.perf_counter()
-                delta, compute_s, stats = vehicle.train(epochs)
+                delta, compute_s, stats = vehicle.train(epochs, t)
                 train_s = time.perf_counter() - tw
                 train_wall += train_s
-                train_stats.append(stats)
                 vtrain[vehicle.real_id] = {"stats": stats, "wall_s": train_s,
                                            "epochs": epochs, "rsu": name,
-                                           "num_samples": vehicle.num_samples}
+                                           "num_samples": vehicle.num_samples,
+                                           "fl_participant": True}
                 envelope = vehicle.build_upload(delta, config["compression"], name, rsu_pk, epochs)
                 compute[name][pid] = compute_s
                 pending_events.append((t0 + CONTROL_PHASE_S + compute_s, name, pid, vehicle,
@@ -355,6 +354,19 @@ class Simulation:
                 va2r[vehicle.real_id] = (t_done + d.airtime_s
                                          - (t0 + CONTROL_PHASE_S)) * 1000.0
         self.world.advance_to(deadline)
+
+        # 3b. Vehicles not training M_i this round (not selected, not authenticated
+        #     or out of coverage) still refine their private model locally: it
+        #     never leaves the OBU, so it needs neither the RSU nor the POMDP (v1).
+        for vid, vehicle in self.vehicles.items():
+            if vid in vtrain:
+                continue
+            tw = time.perf_counter()
+            stats = vehicle.train_private(t)
+            if stats is not None:
+                vtrain[vid] = {"stats": stats, "wall_s": time.perf_counter() - tw,
+                               "epochs": cfg.private_local_epochs, "rsu": None,
+                               "num_samples": vehicle.num_samples, "fl_participant": False}
 
         # 4. RSU aggregation and learning, then Eq. (19) at the base station.
         final = t == cfg.rounds
@@ -442,9 +454,11 @@ class Simulation:
             "round_wall_s": time.perf_counter() - wall0,
             "model_sha256": bs_result["model_sha256"],
         }
-        if train_stats and "private_val_accuracy" in train_stats[0]:
-            row["private_val_accuracy"] = float(np.mean([s["private_val_accuracy"]
-                                                         for s in train_stats]))
+        private_accs = [info["stats"]["private_val_accuracy"] for info in vtrain.values()
+                        if "private_val_accuracy" in info["stats"]]
+        if private_accs:
+            # Fleet-wide: every vehicle's private model trains every round.
+            row["private_val_accuracy"] = float(np.mean(private_accs))
         self.round_rows.append(row)
         self._vanet_finish_round(t, t0, members, logs, metrics, bs_result, row["round_wall_s"],
                                  vbytes, vcomm, vtrain, va2r, vpos)
@@ -474,8 +488,13 @@ class Simulation:
         return w, a
 
     @torch.no_grad()
-    def _vanet_vehicle_quality(self, vehicle: Vehicle, stats: Dict) -> Dict[str, float]:
-        """Post-train shared-model and private-model quality for one vehicle."""
+    def _vanet_vehicle_quality(self, vehicle: Vehicle, stats: Dict,
+                               fl_participant: bool) -> Dict[str, float]:
+        """Post-train shared-model and private-model quality for one vehicle.
+
+        ``train_loss`` follows v1: the private model's DML loss when private
+        models are enabled, else the shared model's.
+        """
         vehicle.model.eval()
         x, y = vehicle.train_data.tensors
         n = min(512, len(x))
@@ -490,6 +509,8 @@ class Simulation:
             priv_acc = float(evaluate(vehicle.model, vehicle.val_data,
                                       vehicle.class_weights)["accuracy"])
         return {"train_loss": float(stats.get("train_loss", 0.0)),
+                "proxy_train_loss": float(stats.get("proxy_train_loss", float("nan"))),
+                "fl_participant": 1.0 if fl_participant else 0.0,
                 "train_accuracy_pct": train_acc * 100.0,
                 "private_test_accuracy_pct": priv_acc * 100.0,
                 "epsilon": float(stats.get("epsilon", 0.0)),
@@ -550,8 +571,10 @@ class Simulation:
         for vid, info in vtrain.items():
             vehicle = self.vehicles[vid]
             self.vanet_quality[(vid, t)] = self._vanet_vehicle_quality(
-                vehicle, info["stats"])
+                vehicle, info["stats"], info["fl_participant"])
             self.vanet.record_duration(vid, t, "training", info["wall_s"])
+            if not info["fl_participant"]:
+                continue            # private-only: no FL exchange to account for
             if vid in self._provision_s:
                 self.vanet.record_duration(vid, t, "key_generation",
                                            self._provision_s[vid])
@@ -608,10 +631,16 @@ class Simulation:
         wall = max(round_wall_s, 1e-3)
         cluster_rx = vbytes.get("BS", (0.0, 0.0))[1]
         total_served = sum(len(v) for v in members.values())
+        # v1's server scores the global proxy on the attack benchmark
+        # (attack1-5_test.csv); the held-out test split is reported alongside.
+        attack = "attack_accuracy" in metrics
         self.vanet_quality[(SERVER_NODE, t)] = {
-            "global_proxy_accuracy_pct": metrics["accuracy"] * 100.0,
-            "global_proxy_f1": metrics["macro_f1"],
-            "global_proxy_recall": metrics.get("macro_recall", float("nan")),
+            "global_proxy_accuracy_pct": (metrics["attack_accuracy"] if attack
+                                          else metrics["accuracy"]) * 100.0,
+            "global_proxy_f1": metrics["attack_macro_f1"] if attack else metrics["macro_f1"],
+            "global_proxy_recall": metrics.get(
+                "attack_macro_recall" if attack else "macro_recall", float("nan")),
+            "global_test_accuracy_pct": metrics["accuracy"] * 100.0,
             "successful_updates": float(successful),
             "throughput_updates_per_sec": successful / wall,
             "throughput_bytes_per_sec": cluster_rx / wall,
@@ -667,11 +696,6 @@ class Simulation:
                 if pid and pid in rsu._config_sizes:
                     w, a = rsu._config_sizes[pid]
                     self._vanet_submit(t, arrival, serving[vid], vid, w, a)
-
-    def run(self) -> Dict:
-        for t in range(1, self.cfg.rounds + 1):
-            self.run_round(t)
-        return self.summary()
 
     def summary(self) -> Dict:
         ref = self.chain.reference()

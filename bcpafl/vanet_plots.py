@@ -8,7 +8,9 @@ titles, legend-inside-axes-headroom layout and round ticks.
 
 Differences from v1 (documented in the outputs, not hidden):
 * accuracy/loss curves come from the metrics CSV, not a training-logs file;
-* per-vehicle rows cover only vehicles that trained that round;
+* accuracy/loss cover every vehicle every round (private models always
+  train); the per-vehicle cost figures average only the vehicles that trained
+  M_i for upload that round (``fl_participant``);
 * communication latency is modeled wireless airtime (v2 delivers in-process,
   there is no host TCP thread to time);
 * AODV is a modeled overlay on the frozen round-start topology (see
@@ -92,6 +94,20 @@ def _vehicle_frame(df: pd.DataFrame) -> pd.DataFrame:
     return vehicle_df
 
 
+def _participant_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Vehicle rows of the round's FL exchange, without private-only training rows.
+
+    Every vehicle trains its private model every round, but only vehicles the
+    POMDP had train M_i for upload spend the round's FL security and
+    communication time; mixing private-only rows into per-vehicle cost means
+    would dilute them.
+    """
+    vehicle_df = _vehicle_frame(df)
+    if "fl_participant" not in vehicle_df.columns:
+        return vehicle_df
+    return vehicle_df[vehicle_df["fl_participant"] != 0.0]
+
+
 def _series(group: pd.DataFrame, col: str, fill: float = 0.0) -> pd.Series:
     if col not in group.columns:
         return pd.Series(fill, index=group.index, dtype=float)
@@ -124,9 +140,9 @@ def _wireless_goodput_by_round(df: pd.DataFrame) -> pd.Series:
 def _plot_accuracy_loss(df: pd.DataFrame, out_dir: Path, saved: List[Path]) -> None:
     vehicle_df = _vehicle_frame(df)
     markers = ['o', 's', '^', 'v', 'd', 'x', '*', '+']
-    # Population view (v1 semantics): a vehicle's private model weights are
-    # frozen between its training rounds, so carrying its last measured value
-    # forward is exact -- it equals re-evaluating the unchanged model.
+    # Population view (v1 semantics).  Every vehicle trains its private model
+    # every round, so gaps are rare; where one occurs the private weights were
+    # unchanged, and carrying the last accuracy forward equals re-evaluating.
     priv = vehicle_df.pivot_table(index="round", columns="node",
                                   values="private_test_accuracy_pct", aggfunc="max")
     priv = priv[priv.index > 0].sort_index().ffill()
@@ -160,9 +176,11 @@ def _plot_accuracy_loss(df: pd.DataFrame, out_dir: Path, saved: List[Path]) -> N
         plt.close()
         saved.append(path)
 
+    # A training loss is only measured while training, so it is never carried
+    # forward (that drew flat "staircase" segments for idle rounds).
     loss = vehicle_df.pivot_table(index="round", columns="node", values="train_loss",
                                   aggfunc="max")
-    loss = loss[loss.index > 0].sort_index().ffill()
+    loss = loss[loss.index > 0].sort_index()
     if not loss.empty:
         plt.figure(figsize=(10, 6))
         for i, col in enumerate(sorted(loss.columns)):
@@ -191,7 +209,7 @@ def _plot_accuracy_loss(df: pd.DataFrame, out_dir: Path, saved: List[Path]) -> N
 # Component plots from per-round vehicle means
 # ----------------------------------------------------------------------
 def _plot_from_csv(df: pd.DataFrame, out_dir: Path, saved: List[Path]) -> None:
-    vehicle_df = _vehicle_frame(df)
+    vehicle_df = _participant_frame(df)
     if vehicle_df.empty:
         return
     r_group = vehicle_df.groupby("round", as_index=True).mean(numeric_only=True)
@@ -476,7 +494,7 @@ def _plot_routing(routing_csv: Path, metadata_path: Path, out_dir: Path,
 # ----------------------------------------------------------------------
 def _write_explanations(df: pd.DataFrame, rsu_range_m: float, out_dir: Path,
                         routing_csv: Optional[Path]) -> Path:
-    vehicle_group = _vehicle_frame(df).groupby("round", as_index=True).mean(
+    vehicle_group = _participant_frame(df).groupby("round", as_index=True).mean(
         numeric_only=True)
     vehicle_group = vehicle_group[vehicle_group.index > 0]
 
@@ -491,7 +509,7 @@ def _write_explanations(df: pd.DataFrame, rsu_range_m: float, out_dir: Path,
     _pop_priv = _priv_pivot.mean(axis=1, skipna=True).dropna()
     _loss_pivot = _vehicle_frame(df).pivot_table(
         index="round", columns="node", values="train_loss", aggfunc="max")
-    _loss_pivot = _loss_pivot[_loss_pivot.index > 0].sort_index().ffill()
+    _loss_pivot = _loss_pivot[_loss_pivot.index > 0].sort_index()
     _pop_loss = _loss_pivot.mean(axis=1, skipna=True).dropna()
 
     security, communication = _v("security_latency_ms"), _v("communication_latency_ms")
@@ -520,14 +538,20 @@ def _write_explanations(df: pd.DataFrame, rsu_range_m: float, out_dir: Path,
 
     entries = [
         ("vanet_accuracy_vs_rounds.png", _extrema_summary(_pop_priv, "%"),
-         "Accuracy can rise as local and global proxy models learn, but it can dip "
-         "because vehicle data are non-IID, the participating set changes with "
-         "mobility, and DP-SGD adds noise to shared proxy updates. The mean is over "
-         "all vehicles with carried-forward values, as in ProxyFL v1."),
+         "Private accuracy is each vehicle's private model on its local held-out "
+         "split; every vehicle trains it every round (DML against the latest global "
+         "model), as in ProxyFL v1. The global proxy line is the aggregated model on "
+         "the attack benchmark (attack1-5_test.csv), which is what v1's server "
+         "reports. Accuracy can dip when non-IID data (--alpha) is used, the "
+         "participating set changes with mobility, or DP-SGD adds noise to proxy "
+         "updates. The learning rate decays per round (lr_decay), so the curves "
+         "settle as training progresses."),
         ("vanet_loss_vs_rounds.png", _extrema_summary(_pop_loss),
-         "Loss generally falls while models fit their local samples. Short rises are "
-         "expected when DML transfers changing predictions between private and proxy "
-         "models, batches differ, and DP noise perturbs proxy gradients."),
+         "The per-vehicle loss is the private model's DML training loss, "
+         "(1-alpha) CE + alpha KL, averaged over the round's batches (v1 semantics). "
+         "It falls while the private models fit their local samples under a "
+         "decaying learning rate. Short rises are expected when DML transfers "
+         "changing predictions between private and proxy models."),
         ("vanet_energy_training_vs_rounds.png", _extrema_summary(_v("energy_training_j"),
                                                                  "J"),
          "Training energy is computed from measured training time, so its rises and "

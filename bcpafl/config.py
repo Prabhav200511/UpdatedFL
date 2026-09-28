@@ -47,17 +47,26 @@ class SimulationConfig:
     num_vehicles: int = 30
     batch_size: int = 64
     learning_rate: float = 0.0015
+    # Per-round exponential learning-rate decay, lr_t = lr * decay^(t-1), for
+    # both the shared and the private model (v1's ExponentialLR, gamma=0.95).
+    # 1.0 keeps the learning rate constant.
+    lr_decay: float = 0.95
     max_samples_per_vehicle: int = 3000
-    # Dirichlet concentration for label-skewed non-IID partitions; None = IID.
-    dirichlet_alpha: float | None = 0.5
+    # Dirichlet concentration for label-skewed non-IID partitions; None = IID
+    # (v1's setting).  With alpha=0.5 a few vehicles hold <50% benign rows and
+    # their local accuracy sits far below the rest of the fleet.
+    dirichlet_alpha: float | None = None
     # Rows held out from the training pool as each RSU's validation set, used
     # to "evaluate model performance and compute R" (Algorithm 1, line 17).
     rsu_validation_rows: int = 1500
 
     # ProxyFL heritage: the shared FL model M_i is the proxy model; each
     # vehicle also keeps a heterogeneous private model trained by Deep Mutual
-    # Learning.  Disable to train M_i on Eq. (1) cross-entropy alone.
+    # Learning.  Disable to train M_i on Eq. (1) cross-entropy alone.  The
+    # private model never leaves the vehicle, so -- as in v1 -- every vehicle
+    # refines it every round, selected by the POMDP or not.
     use_private_models: bool = True
+    private_local_epochs: int = 2
     dml_alpha: float = 0.5
     dml_beta: float = 0.5
     dml_temperature: float = 3.0
@@ -190,6 +199,10 @@ class SimulationConfig:
             raise ValueError("topk_fraction must be in (0, 1]")
         if not 0.0 <= self.malicious_fraction < 1.0:
             raise ValueError("malicious_fraction must be in [0, 1)")
+        if not 0.0 < self.lr_decay <= 1.0:
+            raise ValueError("lr_decay must be in (0, 1]")
+        if self.private_local_epochs < 1:
+            raise ValueError("private_local_epochs must be >= 1")
         if any(x < 0 for x in self.xi_init):
             raise ValueError("xi must be non-negative (Eq. 10)")
         if self.pseudonym_lifetime_rounds < 1 or self.pseudonym_pool_size < 1:

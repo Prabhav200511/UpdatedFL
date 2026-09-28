@@ -11,6 +11,9 @@ Per round (Fig. 2, Algorithm 1 lines 9-13) a vehicle in RSU coverage:
    locally for f epochs -- Deep Mutual Learning with its private model when
    enabled -- computes Delta M_i = M_i - M, compresses it with error
    feedback, and uploads it signed and encrypted.
+
+Every vehicle not training M_i in a round -- not selected, not authenticated or
+out of coverage -- still refines its private model by local DML (ProxyFL v1).
 """
 
 from __future__ import annotations
@@ -201,35 +204,64 @@ class Vehicle:
         optimizer.step()
         self._dp_steps += 1
 
-    def train(self, local_epochs: int) -> Tuple[np.ndarray, float, Dict[str, float]]:
-        """Returns (Delta M_i, simulated compute seconds, training stats)."""
-        if self.global_vector is None:
-            raise RuntimeError("vehicle has no global model to train from")
+    def learning_rate(self, round_num: int) -> float:
+        """lr_t = lr * decay^(t-1): v1's per-round ExponentialLR schedule."""
+        return self.cfg.learning_rate * self.cfg.lr_decay ** max(int(round_num) - 1, 0)
+
+    @torch.no_grad()
+    def _private_val_accuracy(self) -> float:
+        self.private_model.eval()
+        x, y = self.val_data.tensors
+        return float((self.private_model(x).argmax(1) == y).float().mean())
+
+    def _local_dml(self, shared_epochs: int, round_num: int,
+                   use_dp: bool) -> Dict[str, float]:
+        """Deep Mutual Learning on D_i, starting from the current ``self.model``.
+
+        The shared model trains ``shared_epochs`` and the private model
+        ``private_local_epochs``, mutually while both are training.  Returns the
+        mean batch losses: ``train_loss`` is the private model's
+        (1-alpha) CE + alpha KL when private models are enabled -- what v1 logs
+        and plots -- and ``proxy_train_loss`` is the shared model's.
+        """
         cfg = self.cfg
-        set_vector(self.model, self.global_vector)
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=cfg.learning_rate)
+        lr = self.learning_rate(round_num)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        private_epochs = 0
+        if self.private_model is not None:
+            private_epochs = cfg.private_local_epochs
+            for group in self.private_optimizer.param_groups:
+                group["lr"] = lr
         self._loader_seed += 1
         loader = make_loader(self.train_data, cfg.batch_size, self._loader_seed)
         total_loss, batches = 0.0, 0
-        for _ in range(local_epochs):
+        priv_total, priv_batches = 0.0, 0
+        for epoch in range(max(shared_epochs, private_epochs)):
             for x, y in loader:
                 self.model.train()
                 soft_private = None
                 if self.private_model is not None:
                     self.private_model.train()
-                    with torch.no_grad():
-                        shared_soft = F.softmax(self.model(x) / cfg.dml_temperature, dim=1)
-                    priv_out = self.private_model(x)
-                    priv_loss = ((1 - cfg.dml_alpha) * F.cross_entropy(
-                        priv_out, y, weight=self.class_weights)
-                        + cfg.dml_alpha * dml_kl(priv_out, shared_soft, cfg.dml_temperature))
-                    self.private_optimizer.zero_grad()
-                    priv_loss.backward()
-                    self.private_optimizer.step()
-                    with torch.no_grad():
-                        soft_private = F.softmax(self.private_model(x) / cfg.dml_temperature,
-                                                 dim=1)
-                if cfg.dp_noise_multiplier > 0:
+                    if epoch < private_epochs:
+                        with torch.no_grad():
+                            shared_soft = F.softmax(self.model(x) / cfg.dml_temperature, dim=1)
+                        priv_out = self.private_model(x)
+                        priv_loss = ((1 - cfg.dml_alpha) * F.cross_entropy(
+                            priv_out, y, weight=self.class_weights)
+                            + cfg.dml_alpha * dml_kl(priv_out, shared_soft,
+                                                     cfg.dml_temperature))
+                        self.private_optimizer.zero_grad()
+                        priv_loss.backward()
+                        self.private_optimizer.step()
+                        priv_total += float(priv_loss.item())
+                        priv_batches += 1
+                    if epoch < shared_epochs:
+                        with torch.no_grad():
+                            soft_private = F.softmax(
+                                self.private_model(x) / cfg.dml_temperature, dim=1)
+                if epoch >= shared_epochs:
+                    continue
+                if use_dp:
                     self._dp_step(x, y, soft_private, optimizer)
                     with torch.no_grad():
                         loss = F.cross_entropy(self.model(x), y, weight=self.class_weights)
@@ -244,25 +276,51 @@ class Vehicle:
                     optimizer.step()
                 total_loss += float(loss.item())
                 batches += 1
+        stats = {"proxy_train_loss": total_loss / max(batches, 1)}
+        stats["train_loss"] = (priv_total / priv_batches if priv_batches
+                               else stats["proxy_train_loss"])
+        if self.private_model is not None:
+            stats["private_val_accuracy"] = self._private_val_accuracy()
+        return stats
+
+    def train(self, local_epochs: int,
+              round_num: int = 1) -> Tuple[np.ndarray, float, Dict[str, float]]:
+        """Returns (Delta M_i, simulated compute seconds, training stats).
+
+        M_i starts from the global model M and trains ``local_epochs`` (the
+        POMDP's f); see :meth:`_local_dml` for the statistics.
+        """
+        if self.global_vector is None:
+            raise RuntimeError("vehicle has no global model to train from")
+        cfg = self.cfg
+        set_vector(self.model, self.global_vector)
+        stats = self._local_dml(local_epochs, round_num, cfg.dp_noise_multiplier > 0)
         delta = get_vector(self.model) - self.global_vector
         if self.malicious:
             # Model poisoning: a scaled, sign-flipped update.
             delta = -cfg.malicious_scale * delta
         jitter = float(self.rng.lognormal(0.0, 0.1))
         compute_s = local_epochs * self.num_samples / self.compute_rate * jitter
-        stats = {"train_loss": total_loss / max(batches, 1)}
-        if self.private_model is not None:
-            with torch.no_grad():
-                self.private_model.eval()
-                x, y = self.val_data.tensors
-                stats["private_val_accuracy"] = float(
-                    (self.private_model(x).argmax(1) == y).float().mean())
         if cfg.dp_noise_multiplier > 0:
             self.epsilon_spent = epsilon_after(
                 self._dp_steps, cfg.dp_noise_multiplier,
                 min(cfg.batch_size / max(self.num_samples, 1), 1.0), cfg.dp_delta)
             stats["epsilon"] = self.epsilon_spent
         return delta.astype(np.float32), compute_s, stats
+
+    def train_private(self, round_num: int) -> Optional[Dict[str, float]]:
+        """Local DML for a vehicle that is not training M_i for FL this round.
+
+        The private model never leaves the vehicle, so, as in ProxyFL v1, it
+        keeps learning whether or not the POMDP selected the vehicle and
+        whether or not an RSU is in range.  Its DML partner is the vehicle's
+        local copy of the shared model -- the latest global model M it holds,
+        or its own continued copy while out of coverage (v1's proxy).  That copy
+        is never uploaded (:meth:`train` restarts from M), so it needs no DP.
+        """
+        if self.private_model is None:
+            return None
+        return self._local_dml(self.cfg.private_local_epochs, round_num, use_dp=False)
 
     def build_upload(self, delta: np.ndarray, compression: str, rsu_id: str,
                      rsu_pk: PublicKey, local_epochs: int) -> Dict:
