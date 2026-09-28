@@ -72,6 +72,7 @@ class BaseStation:
             attack = evaluate(self.model, self.attack_set, self.class_weights)
             result["attack_accuracy"] = attack["accuracy"]
             result["attack_macro_f1"] = attack["macro_f1"]
+            result["attack_macro_recall"] = attack["macro_recall"]
         return result
 
     def aggregate(self, round_num: int, envelopes: Sequence[Dict]) -> Dict[str, object]:

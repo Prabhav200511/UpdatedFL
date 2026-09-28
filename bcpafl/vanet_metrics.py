@@ -27,8 +27,10 @@ X_OP_IDLE = 0.2
 SERVER_NODE = "Server"
 
 VANET_COLUMNS = [
-    "node", "round", "train_loss", "train_accuracy_pct", "private_test_accuracy_pct",
-    "epsilon", "delta", "global_proxy_accuracy_pct", "global_proxy_f1",
+    "node", "round", "fl_participant", "train_loss", "proxy_train_loss",
+    "train_accuracy_pct", "private_test_accuracy_pct",
+    "epsilon", "delta", "global_proxy_accuracy_pct", "global_test_accuracy_pct",
+    "global_proxy_f1",
     "global_proxy_recall", "successful_updates",
     "throughput_updates_per_sec", "throughput_bytes_per_sec",
     "vanet_wireless_bits", "vanet_airtime_s",

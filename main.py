@@ -24,7 +24,7 @@ def build_config(args: argparse.Namespace) -> SimulationConfig:
     cfg = SimulationConfig(
         rounds=args.rounds, seed=args.seed, num_vehicles=args.vehicles,
         selection=args.selection, malicious_fraction=args.malicious,
-        dirichlet_alpha=None if args.iid else args.alpha,
+        dirichlet_alpha=None if args.iid else args.alpha, lr_decay=args.lr_decay,
         use_private_models=not args.no_private, dp_noise_multiplier=args.dp_noise,
         output_dir=args.output, make_plots=not args.no_plots, verbose=not args.quiet)
     return cfg.validate()
@@ -59,9 +59,12 @@ def main(argv=None) -> int:
     parser.add_argument("--selection", choices=SELECTION_STRATEGIES, default="pomdp")
     parser.add_argument("--malicious", type=float, default=0.1,
                         help="fraction of vehicles that poison their updates")
-    parser.add_argument("--alpha", type=float, default=0.5,
-                        help="Dirichlet alpha for non-IID label skew")
-    parser.add_argument("--iid", action="store_true", help="IID partitions instead")
+    parser.add_argument("--alpha", type=float, default=None,
+                        help="Dirichlet alpha for non-IID label skew (default: IID, as in v1)")
+    parser.add_argument("--iid", action="store_true",
+                        help="force IID partitions (the default unless --alpha is given)")
+    parser.add_argument("--lr-decay", type=float, default=0.95,
+                        help="per-round learning-rate decay (v1: 0.95; 1.0 = constant)")
     parser.add_argument("--no-private", action="store_true",
                         help="disable ProxyFL private models (train M_i on Eq. 1 only)")
     parser.add_argument("--dp-noise", type=float, default=0.0,

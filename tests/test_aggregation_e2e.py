@@ -104,3 +104,21 @@ def test_end_to_end_pomdp_outputs(small_run):
         assert 0.0 <= r["mean_q_selected"] <= 1.0
         assert all(x >= 0 for x in json.loads(r["xi"]))
     assert all(r["selected"] <= r["candidates"] for r in sim.rsu_rows)
+
+
+def test_every_vehicle_reports_private_metrics_each_round(small_run):
+    """v1 semantics: private models train every round, selected by the POMDP or not."""
+    sim, _ = small_run
+    for row in sim.round_rows:
+        t = row["round"]
+        quality = [sim.vanet_quality.get((vid, t)) for vid in sim.vehicles]
+        assert all(q is not None and np.isfinite(q["train_loss"]) for q in quality)
+        assert all(0.0 <= q["private_test_accuracy_pct"] <= 100.0 for q in quality)
+        # Only vehicles that trained M_i count as FL participants.
+        assert sum(q["fl_participant"] for q in quality) <= row["selected"]
+        server = sim.vanet_quality[("Server", t)]
+        # v1 reports the global proxy on the attack benchmark.
+        assert server["global_proxy_accuracy_pct"] == pytest.approx(
+            row["attack_accuracy"] * 100.0)
+        assert server["global_test_accuracy_pct"] == pytest.approx(
+            row["test_accuracy"] * 100.0)
